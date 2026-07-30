@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Профиль — DarkVisuals</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <a href="/" class="logo">⚔ DarkVisuals</a>
+    <nav>
+      <a href="/#pricing">Цены</a>
+      <a href="#" id="logoutLink">Выйти</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="profile-card" id="card">
+      <p>Загрузка...</p>
+    </div>
+  </main>
+
+  <footer>© 2026 DarkVisuals</footer>
+
+  <script>
+    const card = document.getElementById('card');
+    const username = localStorage.getItem('dv_username');
+    const password = localStorage.getItem('dv_password');
+
+    document.getElementById('logoutLink').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('dv_username');
+      localStorage.removeItem('dv_password');
+      window.location.href = '/';
+    });
+
+    if (!username || !password) {
+      window.location.href = '/login.html';
+    } else {
+      fetch('/api/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data.success) {
+            localStorage.removeItem('dv_username');
+            localStorage.removeItem('dv_password');
+            window.location.href = '/login.html';
+            return;
+          }
+
+          let statusHtml;
+          if (data.forever) {
+            statusHtml = `<div class="status-pill forever">Подписка навсегда ♾️</div>`;
+          } else if (data.hasSubscription) {
+            const d = new Date(data.expiresAt);
+            statusHtml = `<div class="status-pill active">Подписка активна</div><p>Истекает: ${d.toLocaleString()}</p>`;
+          } else if (data.expired) {
+            const d = new Date(data.expiresAt);
+            statusHtml = `<div class="status-pill expired">Подписка истекла</div><p>Истекла: ${d.toLocaleString()}</p>`;
+          } else {
+            statusHtml = `<div class="status-pill none">Нет активной подписки</div>`;
+          }
+
+          const downloadHtml = data.launcherUrl
+            ? `<a href="${data.launcherUrl}" class="btn">⬇ Скачать лаунчер</a>`
+            : `<p style="color: var(--text-dim); font-size:14px;">Купи подписку, чтобы открыть скачивание.</p>
+               <a href="/#pricing" class="btn secondary">Посмотреть тарифы</a>`;
+
+          card.innerHTML = `
+            <h2>Привет, ${data.username} 👋</h2>
+            ${statusHtml}
+            <div style="margin-top:24px;">${downloadHtml}</div>
+          `;
+        })
+        .catch(() => {
+          card.innerHTML = '<p>Сервер недоступен. Попробуй позже.</p>';
+        });
+    }
+  </script>
+</body>
+</html>
