@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Dark Visuals — Admin Panel</title>
+    <style>
+        body { background-color: #0d0d0d; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+        .container { display: flex; gap: 20px; max-width: 1300px; margin: auto; align-items: flex-start; }
+        .panel { background: #1a1a1a; padding: 20px; border-radius: 6px; border: 1px solid #333; flex: 1; }
+        .panel-wide { flex: 2.5; }
+        h2 { text-align: center; color: #fff; margin-bottom: 30px; letter-spacing: 2px; }
+        h3 { margin-top: 0; color: #fff; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        input { width: 100%; padding: 10px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #333; background: #262626; color: white; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #555; background: #333; color: white; cursor: pointer; font-weight: bold; margin-bottom: 5px; transition: 0.2s; }
+        button:hover { background: #4a4a4a; }
+        button:disabled { opacity: 0.5; cursor: wait; }
+        .btn-red { background: #5a1a1a; border-color: #7a2222; }
+        .btn-red:hover { background: #7a2222; }
+        .btn-green { background: #1a4a1a; border-color: #2a6a2a; }
+        .btn-green:hover { background: #2a6a2a; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { border: 1px solid #333; padding: 10px; text-align: left; }
+        th { background: #262626; color: #ccc; }
+        .banned { color: #ff4d4d; font-weight: bold; }
+        .active { color: #7dc87d; }
+        .expired { color: #ffb84d; font-weight: bold; }
+        .actions { display: flex; gap: 5px; flex-wrap: wrap; }
+        .actions button { padding: 6px 8px; margin: 0; width: auto; font-size: 12px; }
+        #toast { position: fixed; bottom: 20px; right: 20px; padding: 14px 22px; border-radius: 6px; background: #262626; border: 1px solid #444; color: #fff; display: none; z-index: 10; }
+        #toast.error { border-color: #7a2222; background: #3a1414; }
+        #toast.ok { border-color: #2a6a2a; background: #143a14; }
+        .search-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .search-row input { margin-bottom: 0; }
+        .search-row button { width: auto; padding: 10px 16px; margin: 0; }
+        .muted { color: #777; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+    <h2>УПРАВЛЕНИЕ DARK VISUALS</h2>
+
+    <div class="container">
+        <!-- Форма создания пользователя -->
+        <div class="panel">
+            <h3>Создать аккаунт</h3>
+            <input type="text" id="newUsername" placeholder="Логин">
+            <input type="password" id="newPassword" placeholder="Пароль">
+            <input type="number" id="subDays" placeholder="Дней подписки (пусто = навсегда)">
+            <button onclick="createUser()">Добавить в базу</button>
+        </div>
+
+        <!-- Таблица пользователей -->
+        <div class="panel panel-wide">
+            <h3>Список игроков</h3>
+            <div class="search-row">
+                <input type="text" id="searchBox" placeholder="Поиск по логину..." oninput="renderUsers()">
+                <button onclick="loadUsers()">🔄 Обновить</button>
+            </div>
+            <table id="usersTable">
+                <thead>
+                    <tr>
+                        <th>Логин</th>
+                        <th>HWID</th>
+                        <th>Статус</th>
+                        <th>Подписка до</th>
+                        <th>Управление</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <p class="muted" id="counter"></p>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        // Панель открывается прямо с сервера, поэтому адрес относительный.
+        // Если открываешь index.html как файл — поменяй на "http://localhost:3000/api/admin"
+        const API_URL = location.protocol.startsWith('http') ? "/api/admin" : "http://localhost:3000/api/admin";
+
+        let allUsers = [];
+
+        window.onload = loadUsers;
+
+        function toast(message, isError) {
+            const el = document.getElementById('toast');
+            el.textContent = message;
+            el.className = isError ? 'error' : 'ok';
+            el.style.display = 'block';
+            clearTimeout(el._t);
+            el._t = setTimeout(() => el.style.display = 'none', 3500);
+        }
+
+        async function api(endpoint, body) {
+            try {
+                const res = await fetch(`${API_URL}/${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                return await res.json();
+            } catch (e) {
+                toast("Сервер недоступен! Запущен ли server.js?", true);
+                return { success: false, message: "Нет связи с сервером" };
+            }
+        }
+
+        async function loadUsers() {
+            try {
+                const res = await fetch(`${API_URL}/users`);
+                const data = await res.json();
+                allUsers = data.users || [];
+                renderUsers();
+            } catch (e) {
+                toast("Не удалось загрузить список. Сервер запущен?", true);
+            }
+        }
+
+        function esc(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function renderUsers() {
+            const filter = document.getElementById('searchBox').value.trim().toLowerCase();
+            const tbody = document.querySelector("#usersTable tbody");
+            tbody.innerHTML = "";
+
+            const users = allUsers.filter(u => !filter || (u.username || '').toLowerCase().includes(filter));
+
+            users.forEach(u => {
+                const statusText = u.banned ? `<span class="banned">БАН</span>` : `<span class="active">Работает</span>`;
+                const hwidText = u.hwid ? "Привязан" : "Пусто";
+
+                let dateText = "Навсегда";
+                if (u.expiresAt) {
+                    const d = new Date(u.expiresAt);
+                    dateText = d.toLocaleString();
+                    if (d < new Date()) dateText = `<span class="expired">Истекла (${dateText})</span>`;
+                }
+
+                const name = esc(u.username);
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td>${name}</td>
+                    <td>${hwidText}</td>
+                    <td>${statusText}</td>
+                    <td>${dateText}</td>
+                    <td class="actions">
+                        <button onclick="resetHWID('${name}')">Сброс HWID</button>
+                        <button onclick="setDays('${name}')">Подписка</button>
+                        <button onclick="toggleBan('${name}', ${!u.banned}, this)" class="${u.banned ? 'btn-green' : 'btn-red'}">
+                            ${u.banned ? 'Разбанить' : 'Выдать Бан'}
+                        </button>
+                        <button onclick="deleteUser('${name}', this)" class="btn-red">Удалить</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('counter').textContent = `Всего: ${allUsers.length} | Показано: ${users.length}`;
+        }
+
+        async function createUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value.trim();
+            const days = document.getElementById('subDays').value;
+
+            if (!username || !password) return toast("Заполните логин и пароль!", true);
+
+            const data = await api('create', { username, password, days });
+            if (data.success) {
+                toast(`Аккаунт "${username}" создан!`);
+                document.getElementById('newUsername').value = "";
+                document.getElementById('newPassword').value = "";
+                document.getElementById('subDays').value = "";
+                loadUsers();
+            } else {
+                toast("Ошибка: " + data.message, true);
+            }
+        }
+
+        async function resetHWID(username) {
+            if (!confirm(`Точно сбросить привязку ПК для ${username}?`)) return;
+            const data = await api('reset-hwid', { username });
+            data.success ? toast(`HWID для "${username}" сброшен`) : toast("Ошибка: " + (data.message || ""), true);
+            loadUsers();
+        }
+
+        async function toggleBan(username, banned, btn) {
+            if (banned && !confirm(`Забанить пользователя ${username}? Он больше не сможет войти в лаунчер.`)) return;
+            if (btn) btn.disabled = true;
+            const data = await api('toggle-ban', { username, banned });
+            if (data.success) {
+                toast(banned ? `"${username}" ЗАБАНЕН` : `"${username}" разбанен`);
+            } else {
+                toast("Ошибка: " + (data.message || "не удалось изменить статус"), true);
+            }
+            loadUsers();
+        }
+
+        async function deleteUser(username, btn) {
+            if (!confirm(`Точно УДАЛИТЬ пользователя ${username} навсегда? Это действие нельзя отменить!`)) return;
+            if (btn) btn.disabled = true;
+            const data = await api('delete', { username });
+            if (data.success) {
+                toast(`Пользователь "${username}" удалён из базы`);
+            } else {
+                toast("Ошибка: " + (data.message || "не удалось удалить"), true);
+            }
+            loadUsers();
+        }
+
+        async function setDays(username) {
+            const val = prompt(`Сколько дней подписки выдать для ${username}?\n(0 или пусто = навсегда, отсчёт с текущего момента)`);
+            if (val === null) return;
+            const data = await api('set-days', { username, days: val });
+            data.success ? toast(`Подписка для "${username}" обновлена`) : toast("Ошибка: " + (data.message || ""), true);
+            loadUsers();
+        }
+    </script>
+</body>
+</html>

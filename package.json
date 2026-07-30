@@ -1,0 +1,15 @@
+{
+  "name": "darkvisuals-server",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "hashpass": "node hash-pass.js",
+    "genkey": "node gen-key.js",
+    "encrypt": "node encrypt-mod.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "bcryptjs": "^2.4.3"
+  }
+}

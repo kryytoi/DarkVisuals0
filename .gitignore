@@ -1,0 +1,7 @@
+node_modules/
+# НИКОГДА не коммить реальные ключи или боевую базу юзеров:
+.env
+*.key
+darkvisuals.jar
+# Локальная копия юзеров при разработке (боевая версия живёт на Persistent Disk Render)
+users.local.json

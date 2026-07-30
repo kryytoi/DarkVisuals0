@@ -1,0 +1,123 @@
+# DarkVisuals — сервер защиты платных визуалов
+
+Схема защиты (как в твоём `MainWindow.xaml.cs`):
+
+```
+GitHub (notwhdwnwdwdjd)          Render (WDdwdw / server.js)         Клиент (лаунчер)
+ darkvisuals.enc  ─── качается ──────────────────────────────────►  качает .enc
+ (AES-256, мусор                    хранит AES-ключ (env)            просит ключ ─┐
+  без ключа)                        отдаёт его ТОЛЬКО             ◄── ключ+IV+URL │
+                                    залогиненному +                  расшифровка  │
+                                    не забаненному +                 в ПАМЯТИ     │
+                                    с верным HWID                    watermark    │
+                                                                     jar на диск ◄┘
+                                                                     после игры — стирается
+```
+
+Даже если кто-то скачает `darkvisuals.enc` напрямую с GitHub — это зашифрованный AES-256 файл, без ключа бесполезен. Ключ живёт только на сервере и выдаётся по лицензии.
+
+## Разовая настройка
+
+1. **Сгенерируй ключ:**
+   ```bash
+   npm install
+   node gen-key.js
+   ```
+   Получишь `AES_KEY_BASE64=...` и `AES_IV_BASE64=...`.
+
+2. **Зашифруй мод:**
+   ```bash
+   AES_KEY_BASE64=<key> AES_IV_BASE64=<iv> node encrypt-mod.js darkvisuals.jar darkvisuals.enc
+   ```
+   Залей получившийся `darkvisuals.enc` в репозиторий **notwhdwnwdwdjd**.
+
+3. **Захешируй пароли юзеров** и заполни `users.json`:
+   ```bash
+   node hash-pass.js "пароль_игрока"
+   ```
+
+## Деплой на Render (репозиторий WDdwdw, приватный — Render это поддерживает)
+
+Новый репозиторий создавать НЕ нужно — просто закоммить эти изменения в тот же
+приватный `kryytoi/WDdwdw` и привяжи Render к нему (Render → New → Web Service →
+Connect account → выбери GitHub → дай доступ к приватному репо → выбери WDdwdw).
+
+- Build command: `npm install`
+- Start command: `npm start`
+- **Persistent Disk (обязательно!)**: Render Dashboard → твой сервис → Disks → Add Disk
+  - Mount Path: `/opt/render/project/src/data`
+  - Size: 1 GB достаточно
+  - Без этого диска все юзеры, зарегистрированные через сайт, будут стираться при
+    каждом деплое/рестарте — это и была причина твоего бага с `users.json`.
+- Environment (Environment → Add):
+  - `AES_KEY_BASE64` — из шага 1
+  - `AES_IV_BASE64` — из шага 1
+  - `MOD_URL` — `https://raw.githubusercontent.com/kryytoi/notwhdwnwdwdjd/main/darkvisuals.enc`
+  - `ADMIN_TOKEN` — любой длинный секрет (теперь реально проверяется сервером!)
+  - `PANEL_PATH` — свой секретный путь к админке, например `/panel-xyz123`
+  - `LAUNCHER_URL` — прямая ссылка на скачивание лаунчера (например GitHub Release .exe)
+  - `DATA_DIR` — `/opt/render/project/src/data` (путь к Persistent Disk выше)
+
+> Домен должен совпадать с `ServerBaseUrl` в лаунчере (`https://wddwdw.onrender.com`).
+
+## Публичный сайт (папка `public/`)
+
+- `/` — главная с описанием мода и прайс-листом
+- `/register.html` — самостоятельная регистрация (без подписки, её выдаёт админ)
+- `/login.html` — вход
+- `/profile.html` — личный кабинет: статус подписки, дата истечения, кнопка "Скачать лаунчер"
+  (кнопка появляется только если подписка активна)
+
+Оплату сайт сам не принимает — после регистрации юзер пишет админу, админ переводит
+дни через `/api/admin/set-days` (или через панель `admin.html`).
+
+## Управление пользователями (админ-API)
+
+Все `/api/admin/*` роуты теперь требуют заголовок `x-admin-token`.
+
+```bash
+# список юзеров
+curl https://wddwdw.onrender.com/api/admin/users \
+  -H "x-admin-token: <ADMIN_TOKEN>"
+
+# создать юзера с 30 днями подписки
+curl -X POST https://wddwdw.onrender.com/api/admin/create \
+  -H "x-admin-token: <ADMIN_TOKEN>" -H "Content-Type: application/json" \
+  -d '{"username":"player1","password":"pass123","days":30}'
+
+# выдать/продлить подписку существующему юзеру
+curl -X POST https://wddwdw.onrender.com/api/admin/set-days \
+  -H "x-admin-token: <ADMIN_TOKEN>" -H "Content-Type: application/json" \
+  -d '{"username":"player1","days":120}'
+
+# забанить
+curl -X POST https://wddwdw.onrender.com/api/admin/toggle-ban \
+  -H "x-admin-token: <ADMIN_TOKEN>" -H "Content-Type: application/json" \
+  -d '{"username":"player1","banned":true}'
+
+# сбросить HWID (сменил ПК)
+curl -X POST https://wddwdw.onrender.com/api/admin/reset-hwid \
+  -H "x-admin-token: <ADMIN_TOKEN>" -H "Content-Type: application/json" \
+  -d '{"username":"player1"}'
+```
+
+## ⚠️ Найдено при аудите — стоит убрать вручную
+
+- `Keys.txt` — файл с логин:пароль:роль в открытом виде, нигде в коде не используется.
+  Раз репозиторий приватный — не критично, но лучше удалить или вынести в надёжное место.
+- `users.db` — удалён: это был неиспользуемый дублирующийся файл с поддельным хешем пароля.
+- `gitignore.txt` → переименован в `.gitignore` — раньше файл назывался `.txt`
+  и поэтому Git его вообще не учитывал (`node_modules/` никогда реально не игнорировался).
+
+## Обфускация лаунчера
+
+`Obfuscar.xml` — усиленная версия (шифрует строки/URL, переименовывает приватный код). Положи её в проект вместо текущей и собери в Release — Obfuscar отработает через уже подключённый NuGet-пакет. `MainWindow`, `App` и `Friend` пропускаются намеренно, т.к. привязаны к XAML.
+
+## Защита от "слива" ключа/визуалов — что уже есть и что усилить
+
+Есть в клиенте: расшифровка в памяти, watermark (ник+HWID+время), стирание `.jar` после игры, HWID-привязка, повторная проверка бана на выдаче ключа.
+
+Чего Render/клиент не могут гарантировать на 100% (природа моддинга — jar всё равно попадает в JVM). Чтобы поднять планку:
+- держи `HideStrings=true` (уже включено) — прячет URL'ы;
+- ротация ключа: периодически генерь новый ключ, перешифровывай `.enc`, обновляй env — старые дампы становятся бесполезны;
+- watermark уже даёт трассировку: по слитому jar видно, чей ник/HWID слил.
